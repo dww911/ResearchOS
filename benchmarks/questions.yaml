@@ -1,0 +1,39 @@
+version: 0.1.0
+status: template-only
+tasks:
+  - id: B01
+    name: literature_identity_and_doi_match
+    expected: canonical identity, DOI/arXiv and version evidence
+  - id: B02
+    name: full_text_understanding
+    expected: scope, method, result and limitation with page evidence
+  - id: B03
+    name: figure_analysis
+    expected: selected figure, axes/subplots, trend and supported claim
+  - id: B04
+    name: experimental_parameter_extraction
+    expected: parameter, value, unit, condition and location
+  - id: B05
+    name: formula_and_variable_identification
+    expected: formula, variables, units and assumptions
+  - id: B06
+    name: cross_paper_comparison
+    expected: comparable methods, conditions and source citations
+  - id: B07
+    name: source_evidence_localization
+    expected: PDF page/section/figure/table location
+  - id: B08
+    name: claim_support_judgement
+    expected: supports, contradicts or insufficient with rationale
+  - id: B09
+    name: knowledge_base_retrieval
+    expected: relevant source set and reproducible query trace
+  - id: B10
+    name: incremental_update_and_recovery
+    expected: idempotent import and recoverable failed task
+  - id: B11
+    name: human_note_protection
+    expected: generated block update preserves manual content
+  - id: B12
+    name: runtime_and_token_cost
+    expected: command, duration, model and token accounting

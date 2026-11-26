@@ -1,0 +1,28 @@
+# Local environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Private research material
+*.pdf
+*.sqlite
+*.sqlite3
+*.db
+.env
+.env.*
+!*.env.example
+private/
+ResearchVault/
+
+# Derived Phase 00 runtime output; keep audit text and source manifests reviewable
+phase00/test-vaults/*
+phase00/reports/*
+phase00/upstream/
+phase00/upstream/*/.venv/
+phase00/upstream/*/indexes/
+phase00/upstream/*/logs/

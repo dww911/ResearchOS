@@ -1,0 +1,118 @@
+﻿Phase 00 rerun: 2026-11-26T15:56:52.0721913+08:00
+
+## environment
+PS> py --version; git --version; node --version; npm --version; conda --version
+Python 3.14.3
+git version 2.50.1.windows.1
+v24.14.0
+11.9.0
+conda 23.1.0
+
+exit=0
+
+## knowledge-vault utf8 regression
+PS> $env:PYTHONUTF8="1"; py tests/test_kv.py
+
+exit=0
+
+## MindCite synthetic smoke
+PS> py tools/smoke_test.py
+{
+  "ok": true,
+  "steps": [
+    {
+      "name": "structure_check",
+      "ok": true,
+      "returncode": 0,
+      "stdout": "{\n  \"ok\": true,\n  \"missing\": []\n}",
+      "stderr": ""
+    },
+    {
+      "name": "safety_scan",
+      "ok": true,
+      "returncode": 0,
+      "stdout": "{\n  \"ok\": true,\n  \"findings\": []\n}",
+      "stderr": ""
+    },
+    {
+      "name": "demo_health",
+      "ok": true,
+      "returncode": 0,
+      "stdout": "{\"ok\": true, \"report_path\": \"E:\\\\自媒体\\\\zotero_obsidian_codex\\\\phase00\\\\upstream\\\\MindCite\\\\examples\\\\demo-vault\\\\indexes\\\\vault_health_report.md\", \"orphan_notes_path\": \"E:\\\\自媒体\\\\zotero_obsidian_codex\\\\phase00\\\\upstream\\\\MindCite\\\\examples\\\\demo-vault\\\\indexes\\\\orphan_notes.jsonl\", \"indexed_items\": 1, \"notes_total\": 1, \"papers_notes\": 1, \"legacy_notes\": 0, \"orphan_notes\": 0, \"notes_missing_classification_fields\": 0, \"status_counts\": {\"done\": 1}}",
+      "stderr": ""
+    },
+    {
+      "name": "demo_queue",
+      "ok": true,
+      "returncode": 0,
+      "stdout": "{\"ok\": true, \"queue_path\": \"E:\\\\自媒体\\\\zotero_obsidian_codex\\\\phase00\\\\upstream\\\\MindCite\\\\examples\\\\demo-vault\\\\indexes\\\\classification_review_queue.jsonl\", \"rows\": 1, \"taxonomy_source\": \"E:\\\\自媒体\\\\zotero_obsidian_codex\\\\phase00\\\\upstream\\\\MindCite\\\\examples\\\\demo-vault\\\\indexes\\\\classification_taxonomy.json\", \"taxonomy_version\": \"finance-demo-2026-01\", \"with_theory\": 1, \"with_method\": 1, \"with_topic\": 1}",
+      "stderr": ""
+    },
+    {
+      "name": "demo_tag_discover",
+      "ok": true,
+      "returncode": 0,
+      "stdout": "{\n  \"ok\": true,\n  \"workflow_version\": \"0.3.0\",\n  \"candidates\": 5,\n  \"json_path\": \"E:\\\\自媒体\\\\zotero_obsidian_codex\\\\phase00\\\\upstream\\\\MindCite\\\\examples\\\\demo-vault\\\\indexes\\\\tag_taxonomy_open_candidates.json\",\n  \"markdown_path\": \"E:\\\\自媒体\\\\zotero_obsidian_codex\\\\phase00\\\\upstream\\\\MindCite\\\\examples\\\\demo-vault\\\\indexes\\\\tag_taxonomy_open_candidates.md\"\n}",
+      "stderr": ""
+    },
+    {
+      "name": "demo_tag_priority",
+      "ok": true,
+      "returncode": 0,
+      "stdout": "{\n  \"ok\": true,\n  \"workflow_version\": \"0.3.0\",\n  \"rows\": 5,\n  \"json_path\": \"E:\\\\自媒体\\\\zotero_obsidian_codex\\\\phase00\\\\upstream\\\\MindCite\\\\examples\\\\demo-vault\\\\indexes\\\\tag_taxonomy_open_candidate_priority.json\",\n  \"markdown_path\": \"E:\\\\自媒体\\\\zotero_obsidian_codex\\\\phase00\\\\upstream\\\\MindCite\\\\examples\\\\demo-vault\\\\indexes\\\\tag_taxonomy_open_candidate_priority.md\"\n}",
+      "stderr": ""
+    },
+    {
+      "name": "demo_tag_preview",
+      "ok": true,
+      "returncode": 0,
+      "stdout": "{\n  \"ok\": true,\n  \"workflow_version\": \"0.3.0\",\n  \"mode\": \"preview\",\n  \"counts\": {\n    \"accepted\": 0,\n    \"pending\": 5,\n    \"merged\": 0,\n    \"rejected\": 0,\n    \"skipped\": 0,\n    \"invalid\": 0\n  },\n  \"preview_json_path\": \"E:\\\\自媒体\\\\zotero_obsidian_codex\\\\phase00\\\\upstream\\\\MindCite\\\\examples\\\\demo-vault\\\\indexes\\\\tag_taxonomy_decision_preview_summary.json\",\n  \"preview_markdown_path\": \"E:\\\\自媒体\\\\zotero_obsidian_codex\\\\phase00\\\\upstream\\\\MindCite\\\\examples\\\\demo-vault\\\\indexes\\\\tag_taxonomy_decision_preview_summary.md\",\n  \"apply_json_path\": \"\",\n  \"apply_markdown_path\": \"\",\n  \"applied\": false\n}",
+      "stderr": ""
+    },
+    {
+      "name": "validate_contracts",
+      "ok": true,
+      "returncode": 0,
+      "stdout": "{\n  \"ok\": true,\n  \"schema_version\": \"0.2.0\",\n  \"validated_roots\": [\n    {\n      \"label\": \"demo\",\n      \"path\": \"E:\\\\自媒体\\\\zotero_obsidian_codex\\\\phase00\\\\upstream\\\\MindCite\\\\examples\\\\demo-vault\"\n    }\n  ],\n  \"findings\": []\n}",
+      "stderr": ""
+    },
+    {
+      "name": "empty_index_probe",
+      "ok": true,
+      "returncode": 0,
+      "stdout": "{\"ok\": true, \"processed\": 0, \"message\": \"No indexed papers found. Configure ZOTERO_DB_PATH and run update_zotero_index.py first, or try the demo with MINDCITE_ROOT=examples/demo-vault.\"}",
+      "stderr": ""
+    },
+    {
+      "name": "demo_expectations",
+      "ok": true,
+      "checks": {
+        "demo_index_rows": true,
+        "demo_notes_total": true,
+        "demo_queue_rows": true,
+        "demo_tag_candidates": true,
+        "demo_tag_priority_rows": true,
+        "demo_tag_preview_pending": true,
+        "demo_tag_preview_apply_false": true
+      }
+    }
+  ]
+}
+
+exit=0
+
+## Research Knowledge Workflow core tests
+PS> $env:PYTHONPATH="src"; py -m unittest discover -s tests -v
+
+exit=0
+
+## Codex Literature Workflow tests
+PS> py -m unittest discover -s tests -v
+
+exit=0
+
+## Damon example schema
+PS> py scripts/validate_card.py examples/heavy-paper-deep-read.example.json
+OK: examples\heavy-paper-deep-read.example.json
+
+exit=0

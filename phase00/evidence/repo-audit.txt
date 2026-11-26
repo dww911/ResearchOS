@@ -1,0 +1,1330 @@
+### codex-literature-workflow
+commit: 84b7fff758271db15175e7e02781df00446a8d8c
+date: 2026-07-16 18:13:46 +0800
+files: 49
+--- README (first 180 lines) ---
+# codex-literature-workflow
+
+面向 Codex、Zotero 与 Obsidian 的 agent-native 文献工作流。
+
+[![Stable](https://img.shields.io/badge/status-formal%20release-brightgreen)](#正式版支持范围)
+[![Version](https://img.shields.io/badge/version-v1.0.0-blue)](VERSION)
+[![Validate](https://github.com/ParkerGong/codex-literature-workflow/actions/workflows/validate.yml/badge.svg)](https://github.com/ParkerGong/codex-literature-workflow/actions/workflows/validate.yml)
+[![Python](https://img.shields.io/badge/python-3.12%20tested-blue)](environment.yml)
+[![macOS](https://img.shields.io/badge/platform-macOS%20tested-lightgrey)](#正式版支持范围)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
+[English](README.md) | **简体中文**
+
+发布证据：[1.0.0 审计报告](RELEASE_AUDIT.md)
+
+## 公益声明
+
+本项目是公益性质的，旨在为想用 Codex 进行文献管理、连接 Zotero 方便阅读、制作 Obsidian 私人知识库，但不知道如何开始的朋友，提供一个最最基础的工作流。此工作流只是提供思路，项目里面存在很多十分消耗 token 的环节都需优化，因此请不要把这个项目“奉为圣旨”。
+
+`codex-literature-workflow` 是一个由总控台协调的 Codex skill，用来把研究方向或本地 PDF 库组织成可恢复、可审计的文献流程：找文献、筛选、合法或授权获取 PDF、本地登记、接入 Zotero、PDF-first 精读，并生成 manifest-backed Obsidian 笔记，必要时再做可选 QMD 刷新。
+
+这个项目的出发点很朴素：让 Codex 能围绕一个小方向构建起 Obsidian 文献库，并接入 Zotero，方便研究者继续自己阅读、校对和扩展。因为 Codex 做文献流程时很容易踩坑，比如来源记录丢失、浏览器摘要被误当成论文事实、PDF 下载错、Zotero 附件只写成 URL、Obsidian 笔记脱离页码证据、长对话状态丢失，所以这里把流程拆成“总控台 + 固定 specialist session + durable Markdown 记录”。
+
+## 正式版支持范围
+
+1.0.0 是工作流契约和确定性辅助脚本的正式版。离线回归测试覆盖：skill 元数据、安全安装、controller workspace 初始化与备份、环境报告、PDF 探针的成功/失败语义，以及基于 mock Local API 的 Zotero linked-file mapping 与验证。
+
+真实集成仍取决于本机环境：
+
+- Zotero Desktop 写入需要用户运行生成的 JavaScript，再通过 Local API 验证；本项目绝不写 `zotero.sqlite`。
+- Obsidian 采用 file-first 集成，只能写入用户明确允许的 vault 路径。
+- QMD 是可选项。update/search 可能需要固定到安装 QMD 的 Node 前缀；未经明确授权绝不运行 embedding。
+- 出版社授权访问依赖用户或机构的合法权限；本工作流不绕过付费墙、CAPTCHA、登录或许可限制。
+- macOS 是当前维护测试平台；Windows 仍未验证。
+
+首次运行仍应使用隔离 workspace，并为重要 Zotero 库和 Obsidian vault 做好备份。报告问题时请提供失败阶段、平台、依赖状态、命令输出和 controller records，不要提交私人 PDF、凭据、cookie 或数据库文件。
+
+## 核心思想
+
+长的多阶段流程默认把当前 task 记录为 **总控台 Controller Console**；如果用户已指定其他总控台，则沿用用户选择。总控台负责范围、任务记录、依赖状态、session registry、派发和最终验收；只有用户明确要求 goal tracking 时才负责持久 goal。
+
+其他 session 只做边界清楚的专项工作：
+
+| Session | 职责 | 主要输出 |
+| --- | --- | --- |
+| Controller Console | 范围、可选 goal、路由、验收、恢复 | `project_profile.md`、`dependency_setup.md`、kanban、dispatch log、最终决策 |
+| LiteratureAgent | 文献来源登记、ARS 主导的检索筛选、合法/授权下载 | candidate table、source manifest、download log、质量报告 |
+| ZoteroAgent | 只读查询、linked-file mapping/script 准备和验证 | Zotero link index、生成脚本、附件验证记录 |
+| ObsidianAgent | PDF-first 精读、Obsidian Wiki ingest、可选 QMD/RAG 刷新状态 | 文献笔记、`.manifest.json`、source registry、ingest report、页码证据 |
+
+有 multi-agent 工具时，总控台创建或复用固定 specialist session，并记录到 `00_controller/session_registry.md`；没有时就按同一 handoff/status 契约顺序执行各阶段。不要每篇论文新建一个 session。
+
+## 快速开始
+
+### 1. 安装主 skill
+
+在本仓库 clone 中先做 dry-run，再在规范目录中创建可安装 skill 包：
+
+```bash
+python3 scripts/install_skill.py --dry-run
+python3 scripts/install_skill.py
+```
+
+只有明确要做带备份的覆盖安装时才使用 `--force`。随后新建一个 Codex task，用 `$codex-literature-workflow` 验证 skill 能被发现。
+
+#### 从预览版升级
+
+安装器不会静默覆盖预览版。先检查带备份的替换计划，再明确执行：
+
+```bash
+python3 scripts/install_skill.py --dry-run --force
+python3 scripts/install_skill.py --force
+```
+
+替换前，安装器会把现有 skill 目录移动到 Codex home 下带时间戳的备份目录。
+
+### 2. 准备永久 Python 环境
+
+推荐使用一个长期存在的命名环境，而不是每个项目临时建 `venv`。这样浏览器下载、PDF 解析、页面渲染和 OCR 工具都能稳定复用。
+
+```bash
+micromamba env create -f environment.yml
+micromamba activate codex-literature
+python3 scripts/env_check.py --json --strict
+```
+
+如果没有 `micromamba`，可等价使用 `mamba env create -f environment.yml` 或 `conda env create -f environment.yml`，再激活 `codex-literature`。
+
+如果环境已经存在：
+
+```bash
+micromamba activate codex-literature
+micromamba env update -f environment.yml
+python3 -m pip install -r requirements.txt
+python3 scripts/env_check.py --json --strict
+```
+
+### 3. 安装或启用 companion skills/plugins
+
+正式测试前，先让 Codex 安装或启用与你要测试的流程匹配的外部 skills/plugins：
+
+公开/开源 companion skills 有明确上游时，建议直接从 GitHub 安装。本仓库只打包下表中标注为 vendored 的维护者自建 companion skills。
+
+| Companion | 推荐状态 | 原始/来源 URL | 用途 |
+| --- | --- | --- | --- |
+| `academic-research-suite` | 强烈推荐 | Codex adapter: <https://github.com/Imbad0202/academic-research-skills-codex>；upstream suite: <https://github.com/Imbad0202/academic-research-skills> | 默认文献发现、筛选策略、query expansion、引用/完整性检查 |
+| `research-lr-ra` | 可选辅助 | 已 vendored 到本仓库 `companion-skills/research-lr-ra` | ARS 不可用或某个窄 LR 子任务更适合时，用于旧 LR 支持和 research-gap mapping |
+| `zotero:Zotero` plugin/connector | 需要 Zotero 输出时启用 | OpenAI/Codex plugin capability；见 <https://help.openai.com/en/articles/20001256> | 只读 Zotero 查询、导出、collection 和验证；导入由用户执行 |
+| `zotero-linked-attachments` | 需要 Zotero linked files 时启用 | 已 vendored 到本仓库 `companion-skills/zotero-linked-attachments` | 准备由用户运行的 PDF/MD linked-file 脚本，并只读验证结果 |
+| 来自 `Given-Dream/sciencedirect-live-session-fetcher` 的 `sciencedirect-live-session-fetcher` | 可选；授权浏览器下载测试时推荐 | <https://github.com/Given-Dream/sciencedirect-live-session-fetcher> | 复用 live authorized browser session 获取出版社 PDF |
+| Browser / Chrome / Computer Use plugins | 可选但很有用 | OpenAI/Codex plugin capabilities；见 <https://help.openai.com/en/articles/20001256> | 浏览器导航、认证 session、UI fallback |
+| `wiki-query`、`wiki-ingest` 或 `obsidian-wiki-ingest` | 需要本地 KB 集成时启用 | 安装前需核验的公开示例：<https://github.com/Ar9av/obsidian-wiki>、<https://github.com/AgriciDaniel/claude-obsidian> | 已有知识库查询与 Obsidian/RAG 风格笔记接入 |
+| QMD (`@tobilu/qmd`) | 需要本地 vault search/index 刷新时启用 | npm package: <https://www.npmjs.com/package/@tobilu/qmd> | 更新并查询本地 vault 索引；embedding 必须明确批准 |
+
+如果某个 companion 不可用，把状态记录到 `00_controller/dependency_setup.md`，并走文档中的 fallback 路径。不要假装已经使用了不可用的 companion。
+
+把这些 vendored 的维护者自建 companion skills 安装到当前 Codex skills 目录：
+
+```bash
+python3 scripts/install_companion_skills.py
+```
+
+只有在你明确要覆盖本地已有副本时，才加 `--force`。
+
+### 4. 记录总控台 session
+
+长任务开始前，把当前 task 记录为总控台；如果用户已经选择了另一个总控台，则沿用该选择。
+
+推荐短提示词：
+
+```text
+你是 codex-literature-workflow 的 Controller Console。
+不要自己吞掉所有工作。
+先初始化 controller records，检查依赖，选择或创建固定 specialist sessions，然后派发小范围任务。
+文献发现和筛选默认使用 academic-research-suite。
+research-lr-ra 只作为辅助或兜底。
+只有我或 host project 明确启用时才创建本地 Git checkpoint；绝不自动 push。
+只有 Controller Console 可以标记输出 accepted。
+```
+
+只有用户明确要求 goal tracking 时才创建持久 goal；否则记录 `long_task_goal: not-needed`。
+
+推荐长任务 goal 提示词：
+
+```text
+Goal: Build a source-grounded Zotero and Obsidian-ready literature workspace for <TOPIC_OR_DIRECTION>.
+
+You are the Controller Console for codex-literature-workflow.
+
+Rules:
+- Keep this session as the only controller and acceptance owner.
+- Do not perform every phase yourself unless a phase is tiny.
+- Create or reuse fixed specialist sessions:
+  - LiteratureAgent for ARS-led search, screening, legal/authorized acquisition, and source manifests.
+  - ZoteroAgent for Zotero parent/collection lookup, linked PDF/MD script preparation, and verification; the user runs Desktop writes.
+  - ObsidianAgent for PDF-first reading, selected visual checks, Obsidian Wiki manifest-backed notes, and optional QMD/local RAG refresh status.
+- Create or reuse fixed specialist sessions when supported; otherwise record and use sequential phase execution.
+- Before any long batch, initialize controller records and dependency_setup.md.
+- Before a full multi-phase run, ask for paper direction, expected paper count, source input mode, download/access permission, language scope, Zotero connection, Obsidian connection, local input paths, output paths, collection/vault mapping needs, and checkpoint policy.
+- Record those answers in project_profile.md and set user_scope_confirmed=true before dispatch.
+- If Git checkpoints are enabled, verify the target root before committing. If disabled, record that state and continue.
+- When enabled, checkpoint only explicit privacy-reviewed files at the configured interval.
+- Run privacy scans before staging files. Do not commit private PDFs, Zotero databases, browser cookies, credentials, or closed vault content unless explicitly approved. Never push automatically.
+- Use academic-research-suite as the default research companion for literature discovery and screening.
+- Use research-lr-ra only as auxiliary/fallback when ARS is unavailable or a narrow LR task fits it better.
+- Do not bypass paywalls, logins, CAPTCHAs, or institutional access controls.
+- Do not write zotero.sqlite directly.
+- Do not treat QMD as the source of truth. QMD is optional index/search infrastructure; run qmd embed only with explicit approval.
+- Do not claim paper facts from snippets or model memory.
+- Every phase must write a durable handoff and update its worklog.
+- Stop at Waiting review for specialist outputs; controller acceptance is separate.
+
+Start by creating or updating the controller workspace records, dependency setup record, session registry, and first small dispatch plan.
+```
+
+### 5. 初始化目标项目的 controller records
+
+在本 skill 仓库中运行：
+
+```bash
+--- LICENSE head ---
+MIT License
+
+Copyright (c) 2026 ParkerGong
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+--- requirements/manifests ---
+## environment.yml
+name: codex-literature
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - poppler
+  - tesseract
+  - pip:
+      # Keep this portable when -f uses an absolute skill path from another cwd.
+      # Keep versions in sync with requirements.txt.
+      - pypdf>=4.3.0
+      - pdfplumber>=0.11.4
+      - pymupdf>=1.24.0
+      - pillow>=10.4.0
+      - requests>=2.32.0
+      - beautifulsoup4>=4.12.0
+      - selenium>=4.28.0
+      - websocket-client>=1.8.0
+## requirements-dev.txt
+PyYAML>=6.0
+## requirements.txt
+# PDF text extraction, selected-page rendering, and image checks.
+pypdf>=4.3.0
+pdfplumber>=0.11.4
+pymupdf>=1.24.0
+pillow>=10.4.0
+
+# Metadata lookup and HTML parsing helpers.
+requests>=2.32.0
+beautifulsoup4>=4.12.0
+
+# Live authorized browser-session PDF fetching.
+# From Given-Dream/sciencedirect-live-session-fetcher requirements.txt.
+selenium>=4.28.0
+websocket-client>=1.8.0
+--- scripts/commands scan ---
+## evals\evals.json
+67: "expected_output": "The workflow creates or verifies manifest-backed Obsidian Wiki files including .manifest.json, source_registry.md, zotero_link_index.md, and one formal note per canonical source; duplicate aliases are report/manifest-only; manual-check sources do not become formal notes; QMD is treated as optional index infrastructure rather than source of truth; qmd update/status/search are attempted only when available and configured; qmd embed/query/vsearch are not run without explicit approval; no real Zotero sqlite, production vault, private PDFs, credentials, or browser cookies are modified.",
+## scripts\init_workspace.py
+258: - Do not write zotero.sqlite directly.
+287: | zotero-linked-attachments | user-run PDF/MD linked-file script preparation and read-only verification | pending | do not write zotero.sqlite directly |
+298: | academic-research-suite | install/enable first | Codex adapter: https://github.com/Imbad0202/academic-research-skills-codex ; upstream suite: https://github.com/Imbad0202/academic-research-skills | external literature discovery or screening | generic screening rubric; mark ARS unavailable |
+300: | zotero:Zotero plugin/connector | enable before Zotero phases | OpenAI/Codex plugin capability: https://help.openai.com/en/articles/20001256 | read-only Zotero lookup/export/verification requested | mark Zotero pending/manual; ask the user to perform imports or writes |
+302: | sciencedirect-live-session-fetcher | install before authorized-browser publisher download tests | https://github.com/Given-Dream/sciencedirect-live-session-fetcher | access_mode=authorized-browser and publisher route fits | Chrome control, Computer Use once, then manual-user |
+303: | Browser / Chrome / Computer Use plugins | enable when browser/session access is needed | OpenAI/Codex plugin capabilities: https://help.openai.com/en/articles/20001256 | authenticated browsing, visible UI fallback, or manual verification | stop for user/manual action |
+305: | wiki-query / wiki-ingest / obsidian-wiki-ingest | install/enable only when local KB/Obsidian integration is requested | examples to verify before install: https://github.com/Ar9av/obsidian-wiki ; https://github.com/AgriciDaniel/claude-obsidian | existing KB lookup or Obsidian/RAG output | file-first Markdown notes with pending KB integration |
+306: | QMD (@tobilu/qmd) | optional install only when vault search/index refresh is requested | https://www.npmjs.com/package/@tobilu/qmd | update/search local vault index after Obsidian writes | skip and record qmd_status; use lexical/sparse fallback if needed |
+350: python3 -m pip install -r {{SKILL_ROOT}}/requirements.txt
+## tests\test_scripts.py
+493: "http://127.0.0.1:1/api/users/0",
+551: 'process.argv = [process.execPath, verifier, mapping, "--api", "http://mock/api/users/0"];',
+608: 'process.argv = [process.execPath, verifier, mapping, "--api", "http://mock/api/users/0"];',
+680: 'process.argv = [process.execPath, verifier, mapping, "--api", "http://mock/api/users/0"];',
+
+
+### damon-academic-workflow
+commit: 4459b13008ce305ed312fde723f13ddf5f7e878d
+date: 2026-06-04 13:21:56 +0800
+files: 26
+--- README (first 180 lines) ---
+# Damon Academic Workflow
+
+[简体中文](README.zh-CN.md) | English
+
+> A practical research workflow for turning papers into traceable Zotero records, evidence-grounded JSON cards, and Obsidian notes with real figure interrogation.
+
+[![Workflow](https://img.shields.io/badge/workflow-Zotero%20%2B%20Obsidian%20%2B%20LLM-blue)](#what-damon-does)
+[![Schema](https://img.shields.io/badge/output-HeavyPaperDeepRead%20JSON-green)](templates/HeavyPaperDeepRead.schema.json)
+[![License: MIT](https://img.shields.io/badge/license-MIT-black)](LICENSE)
+
+Damon is a multi-role academic reading system built for researchers who do not want another abstract summarizer. It forces each paper through source capture, Zotero intake, heavy deep reading, figure/table interrogation, Obsidian rendering, and final audit.
+
+The core idea is simple: a useful literature note should tell you what the paper actually proves, what it does not prove, which figure carries the evidence, and what you can reuse in your next experiment.
+
+## What Damon Does
+
+- Captures papers from DOI, arXiv, publisher pages, PDFs, or clean web text.
+- Stores bibliographic truth in Zotero instead of scattered Markdown.
+- Generates strict `HeavyPaperDeepRead` JSON before any polished note is written.
+- Forces core figures/tables through `Targeting -> Deep Interrogation -> JSON Synthesis`.
+- Reconstructs the technical route of each paper: inputs, model, outputs, evaluation, and reproducibility notes.
+- Renders researcher-friendly Obsidian notes without inventing claims beyond the JSON evidence card.
+- Audits metadata, evidence, uncertainty, figure grounding, and note quality before reporting completion.
+
+```mermaid
+flowchart LR
+  A["Maya: source capture"] --> B["Zora: Zotero intake"]
+  B --> C["Lumen: HeavyPaperDeepRead JSON"]
+  C --> D["Nora: Obsidian note"]
+  D --> E["Vera: quality audit"]
+  E --> F["Damon: final report"]
+
+  C --> G["Figure Targeting"]
+  G --> H["Deep Interrogation"]
+  H --> I["JSON Synthesis"]
+  I --> C
+```
+
+## Why This Exists
+
+Most AI literature workflows fail in the same way:
+
+1. They summarize the abstract.
+2. They describe figures without reading them as evidence.
+3. They mix verified facts, author claims, and model guesses.
+4. They produce notes that look complete but are hard to trust later.
+
+Damon is designed around the opposite behavior. It treats figures as evidence units, keeps JSON as the audit source, and writes Obsidian notes only after the evidence card passes validation.
+
+## Architecture
+
+![Architecture Diagram](docs/architecture_diagram.png)
+
+## Repository Layout
+
+```text
+skills/                 Codex-style skill definitions for Damon and assistants
+templates/              JSON schema and reusable prompts
+docs/                   Setup, architecture, and workflow documentation
+examples/               Example JSON card and Obsidian note
+scripts/                Lightweight validation helper
+.github/workflows/      CI check for example schema validity
+```
+
+## Quick Start
+
+1. Copy the skills into your Codex skills directory:
+
+   ```powershell
+   Copy-Item -Recurse .\skills\* "$env:USERPROFILE\.codex\skills\"
+   ```
+
+2. Create a Zotero collection for your domain, for example `EEG Papers`.
+
+3. Create an Obsidian vault folder and add a Damon workspace:
+
+   ```text
+   _Damon/
+     00-Templates/
+     01-Inbox/
+     02-Deep-Reads/
+     02-Deep-Reads-JSON/
+     04-Reports/
+     05-Figures/
+   ```
+
+4. Put `templates/HeavyPaperDeepRead.schema.json` into your vault's `_Damon/00-Templates/` folder.
+
+5. Ask Codex or another agent:
+
+   ```text
+   Use Damon to deep-read these papers. Import them into Zotero, produce HeavyPaperDeepRead JSON, interpret core figures, render Obsidian notes, and report unresolved risks.
+   ```
+
+## The Five Agents
+
+| Agent | Role | Output |
+|---|---|---|
+| Damon | Orchestrator | Final report and end-to-end state |
+| Maya | Source scout | Raw Literature Packet |
+| Zora | Zotero librarian | Zotero Intake Receipt |
+| Lumen | Deep reader | Validated HeavyPaperDeepRead JSON |
+| Nora | Obsidian architect | Human-readable note with embedded figures |
+| Vera | Auditor | PASS / PASS_WITH_NOTES / NEEDS_FIX |
+
+## The Figure Interrogation Rule
+
+If a paper has accessible figures or tables, Damon does not accept caption paraphrase. Each selected figure must answer:
+
+- Why was this figure selected?
+- What are the inputs, components, outputs, or visual mechanisms?
+- What claim does it actually support?
+- What can it not support?
+- What hidden assumptions or failure cases remain?
+- What is reusable for the reader's research?
+- What three Journal Club questions should be asked?
+
+## Example Output
+
+- JSON card: [examples/heavy-paper-deep-read.example.json](examples/heavy-paper-deep-read.example.json)
+- Obsidian note: [examples/obsidian-note.example.md](examples/obsidian-note.example.md)
+
+## Validation
+
+```powershell
+python .\scripts\validate_card.py .\examples\heavy-paper-deep-read.example.json
+```
+
+## Privacy
+
+This repository intentionally excludes:
+
+- Zotero databases
+- private Obsidian notes
+- PDFs and publisher downloads
+- local absolute paths
+- API keys or browser session data
+- unpublished research results
+
+Use `docs/security-and-privacy.md` before publishing your own Damon-derived repository.
+
+## License
+
+MIT.
+
+--- LICENSE head ---
+MIT License
+
+Copyright (c) 2026 Damon Academic Workflow contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--- requirements/manifests ---
+--- scripts/commands scan ---
+## examples\heavy-paper-deep-read.example.json
+7: "doi_or_url": "https://example.org/paper",
+8: "paper_url": "https://example.org/paper"
+## templates\HeavyPaperDeepRead.schema.json
+2: "$schema": "http://json-schema.org/draft-07/schema#",
+
+
+### knowledge-vault
+commit: d08f39b8118f16f77c4bfaafa3764ae7467f796b
+date: 2026-07-10 02:40:16 -0700
+files: 96
+--- README (first 180 lines) ---
+# Knowledge Vault
+
+A local research knowledge base for Codex and Claude Code. Ingest papers, URLs, notes, and Zotero collections; compile linked summaries and concepts; ask grounded questions; browse the result in Obsidian.
+
+[![Release](https://img.shields.io/github/v/release/psypeal/knowledge-vault)](https://github.com/psypeal/knowledge-vault/releases)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Codex](https://img.shields.io/badge/Codex-plugin-111827.svg)](https://developers.openai.com/codex/plugins)
+[![Claude Code](https://img.shields.io/badge/Claude_Code-plugin-7C3AED.svg)](https://docs.anthropic.com/en/docs/claude-code)
+
+## What it does
+
+- Stores each vault inside the current project under `.vault/`.
+- Preserves source artifacts and creates compact Markdown extracts.
+- Compiles sources into an Obsidian-compatible wiki with `[[wikilinks]]`.
+- Answers questions from the vault before falling back to source documents.
+- Optionally searches academic MCP sources and imports Zotero collections.
+- Optionally builds PageIndex trees for targeted PDF retrieval.
+
+The core workflows require Python 3.10 or newer and run on Linux, macOS, and Windows. External research sources, Poppler PDF extraction, and PageIndex tree indexing are optional.
+
+## Install
+
+### Codex
+
+```bash
+codex plugin marketplace add psypeal/knowledge-vault
+codex plugin add knowledge-vault@knowledge-vault
+```
+
+In Codex, invoke `@knowledge-vault` or ask naturally:
+
+```text
+Initialize a knowledge vault in this project.
+Add this PDF to my knowledge vault.
+Compile the pending vault sources.
+Answer this question from my knowledge vault: ...
+```
+
+### Claude Code
+
+```text
+/plugin marketplace add psypeal/knowledge-vault
+/plugin install knowledge-vault@knowledge-vault
+/reload-plugins
+```
+
+Claude Code supports the same natural-language requests plus `/knowledge-vault:*` commands.
+
+## Quick start
+
+1. Initialize the vault:
+
+   ```text
+   Initialize a knowledge vault in this project.
+   ```
+
+2. Add material:
+
+   ```text
+   Add https://example.com/article to my knowledge vault.
+   Add ./papers/example.pdf to my knowledge vault.
+   Add these meeting notes to my knowledge vault: ...
+   ```
+
+3. Compile pending sources:
+
+   ```text
+   Compile my knowledge vault.
+   ```
+
+4. Ask a grounded question:
+
+   ```text
+   Ask my knowledge vault: What evidence supports this conclusion?
+   ```
+
+Knowledge Vault adds concise project guidance to both `AGENTS.md` and `CLAUDE.md`, so either host recognizes an initialized vault later.
+
+New vaults also include `.vault/.gitignore`, so research material stays out of version control by default. Advanced users can run the core initializer with `--track` to opt in deliberately.
+
+## Workflows
+
+| Workflow | Natural-language example | Claude Code command |
+|---|---|---|
+| Initialize | `Initialize a knowledge vault` | `/knowledge-vault:init` |
+| Ingest | `Add this URL/PDF/note to the vault` | `/knowledge-vault:ingest` |
+| Import Zotero | `Import my neuroimaging Zotero collection` | `/knowledge-vault:ingest-zotero` |
+| Collect papers | `Find recent papers about ...` | `/knowledge-vault:collect` |
+| Compile | `Compile pending vault sources` | `/knowledge-vault:compile` |
+| Query | `Ask the vault: ...` | `/knowledge-vault:query` |
+| Enrich references | `Find full text for reference-only items` | `/knowledge-vault:enrich-references` |
+| Process inbox | `Process the vault inbox` | `/knowledge-vault:process` |
+| Check health | `Lint the knowledge vault` | `/knowledge-vault:lint` |
+| Repair wiki | `Clean up the compiled vault` | `/knowledge-vault:cleanup` |
+| Configure sources | `Set up research sources` | `/knowledge-vault:setup-sources` |
+| Show status | `Show vault status` | `/knowledge-vault:status` |
+
+## Vault layout
+
+```text
+.vault/
+├── .gitignore               Privacy-first Git exclusion
+├── agent.md                 Retrieval hints learned from repeated queries
+├── inbox/                   Files waiting for the process workflow
+├── originals/               Preserved PDFs, HTML, and other source artifacts
+├── preferences.md           Domain and compilation preferences
+├── raw/
+│   ├── .manifest.json       Source state
+│   ├── <slug>.md            Compact extracted source
+│   └── <slug>.tree.json     Optional PageIndex tree
+├── sources.json             Enabled research-source preferences
+├── templates/
+└── wiki/
+    ├── concepts/            Cross-source concept articles
+    ├── summaries/           Per-source summaries
+    ├── outputs/             Filed answers and lint reports
+    ├── _backlinks.json
+    ├── .state.json
+    └── index.md
+```
+
+Open `.vault/` directly in Obsidian to browse links and graph relationships. Use plugin workflows to modify generated wiki content so manifests and indexes stay consistent.
+
+## Architecture
+
+- One canonical `knowledge-vault` skill routes every workflow in Codex and Claude Code.
+- Claude Code slash commands are manual wrappers over that same skill, not independent implementations.
+- `scripts/kv.py` owns manifest/index state transitions, locking, atomic writes, rollback, rebuilds, and linting.
+- Source-derived values travel through JSON request files rather than shell interpolation.
+- Legacy `.sh` entry points remain as compatibility adapters; current workflows call Python directly.
+
+## Optional integrations
+
+Run `Set up research sources for my knowledge vault` to detect and configure integrations. The setup workflow uses the correct command for the active host.
+
+| Integration | Purpose | Requirement |
+|---|---|---|
+| Consensus | Evidence-focused academic search | MCP registration |
+| arXiv | Search and download preprints | `uvx`, `arxiv-mcp-server==0.5.0`, and MCP registration |
+| Paper Search | Search multiple academic indexes | Node.js, `paper-search-mcp-nodejs@0.2.7`, and MCP registration |
+| Zotero | Collections, metadata, full text, annotations | Zotero 7 and `zotero-mcp-server==0.6.1` |
+| Unpaywall | Open-access PDF discovery by DOI | `UNPAYWALL_EMAIL` |
+| PageIndex | Hierarchical PDF tree retrieval | Optional Python environment and model API key |
+| Sci-Hub | Optional DOI-based retrieval fallback | Explicit opt-in and legal review |
+
+Codex and Claude Code store MCP configuration differently. In particular, the current Codex CLI registers MCP servers in user configuration; the plugin still requires a per-vault `.vault/.scihub-enabled` marker before it will use the optional Sci-Hub integration.
+
+PageIndex supports `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. Set `KNOWLEDGE_VAULT_PAGEINDEX_MODEL` to override the default LiteLLM model. API keys remain in the user's environment and are never copied into the plugin or vault.
+
+## Update and remove
+
+Codex:
+
+```bash
+codex plugin marketplace upgrade knowledge-vault
+codex plugin add knowledge-vault@knowledge-vault
+```
+
+To remove it:
+
+```bash
+codex plugin remove knowledge-vault@knowledge-vault
+```
+
+Claude Code:
+
+```text
+/plugin marketplace update knowledge-vault
+/reload-plugins
+/plugin uninstall knowledge-vault@knowledge-vault
+```
+
+Removing the plugin does not delete project `.vault/` directories.
+
+## Existing vaults
+
+The `.vault/` format remains backward compatible. Re-running initialization refreshes missing `AGENTS.md` or `CLAUDE.md` guidance without replacing vault data.
+
+Installs from `2.4.1` or earlier may still use the old marketplace name. Re-add it once:
+
+--- LICENSE head ---
+MIT License
+
+Copyright (c) 2026 Psypeal
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+--- requirements/manifests ---
+--- scripts/commands scan ---
+## .claude-plugin\marketplace.json
+7: "description": "Local research knowledge vault for Claude Code and Codex, with source ingestion, grounded querying, and optional academic MCP integrations.",
+13: "description": "Project-scoped research vault with ingestion, compilation, grounded queries, optional academic MCP sources, and Obsidian-compatible Markdown.",
+## eval\eval-runner.sh
+128: rm -rf "$WORK_DIR"
+## eval\fixtures\setup-vault.sh
+12: rm -rf "$VAULT"
+33: source: "https://pubmed.ncbi.nlm.nih.gov/37019461/"
+59: source: "https://pubmed.ncbi.nlm.nih.gov/example1/"
+85: source: "https://doi.org/10.1016/S0140-6736(20)30367-6"
+110: source: "https://pubmed.ncbi.nlm.nih.gov/example2/"
+142: source: "https://pubmed.ncbi.nlm.nih.gov/37019447/"
+## plugins\knowledge-vault\.claude-plugin\plugin.json
+4: "description": "Local research knowledge vault for Claude Code and Codex, with source ingestion, grounded querying, and optional academic MCP integrations.",
+## plugins\knowledge-vault\.codex-plugin\plugin.json
+4: "description": "Local research knowledge vault for Codex and Claude Code, with source ingestion, grounded querying, and optional academic MCP integrations.",
+8: "homepage": "https://github.com/psypeal/knowledge-vault",
+9: "repository": "https://github.com/psypeal/knowledge-vault",
+26: "longDescription": "Knowledge Vault turns a project into a local, Obsidian-compatible research workspace. Ingest papers, URLs, notes, and Zotero items; compile linked summaries and concepts; then answer questions from the vault with source-grounded retrieval. Academic MCP sources and PageIndex PDF trees are optional.",
+34: "websiteURL": "https://github.com/psypeal/knowledge-vault",
+35: "privacyPolicyURL": "https://github.com/psypeal/knowledge-vault/blob/main/PRIVACY.md",
+36: "termsOfServiceURL": "https://github.com/psypeal/knowledge-vault/blob/main/LICENSE",
+## plugins\knowledge-vault\scripts\detect_mcp_sources.py
+186: "claude": "claude mcp add --transport http consensus https://mcp.consensus.app/mcp",
+188: "codex mcp add consensus --url https://mcp.consensus.app/mcp",
+189: "codex mcp login consensus",
+199: "claude": "claude mcp add arxiv-mcp-server -- uvx arxiv-mcp-server==0.5.0 --storage-path .vault/raw/arxiv-papers",
+200: "codex": "codex mcp add arxiv-mcp-server -- uvx arxiv-mcp-server==0.5.0 --storage-path .vault/raw/arxiv-papers",
+209: "claude": "claude mcp add paper-search -- npx -y paper-search-mcp-nodejs@0.2.7",
+210: "codex": "codex mcp add paper-search -- npx -y paper-search-mcp-nodejs@0.2.7",
+221: "zotero-mcp setup",
+222: "claude mcp add zotero -- zotero-mcp",
+226: "zotero-mcp setup --no-claude",
+227: "codex mcp add zotero --env ZOTERO_LOCAL=true -- zotero-mcp",
+## plugins\knowledge-vault\scripts\download.py
+58: headers={"User-Agent": "Knowledge-Vault/2.6 (+https://github.com/psypeal/knowledge-vault)"},
+## plugins\knowledge-vault\scripts\ingest-zotero.sh
+35: source = f"https://doi.org/{doi}" if doi else f"zotero://select/library/items/{zotero_key}"
+## plugins\knowledge-vault\scripts\setup_pageindex.py
+33: run("git", "clone", "--filter=blob:none", "https://github.com/VectifyAI/PageIndex.git", str(checkout))
+## tests\test_kv.py
+99: "source": "https://example.com/a?x='quoted'&y=$(id)",
+259: "title": "Source [Links](https://evil.example) <script>alert(1)</script> | row",
+278: self.assertIn("Source \\[Links\\](https://evil.example)", index)
+286: base = f"http://127.0.0.1:{server.server_port}"
+340: for unsafe in ('curl -L', '/tmp/kv-', 'bash "${KV_PLUGIN_ROOT}', '$knowledge-vault'):
+## tests\validate-plugin.sh
+16: trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
+
+
+### MindCite
+commit: ac20ef5b4903544d66757acdb21ccfea3e2fd4a1
+date: 2026-05-07 12:36:28 +0800
+files: 73
+--- README (first 180 lines) ---
+<p align="center">
+  <a href="./README.md"><strong>中文</strong></a>
+  ·
+  <a href="./README_EN.md">English</a>
+</p>
+
+<h1 align="center">MindCite</h1>
+
+<p align="center">
+  <strong>A local-first research workflow template for Zotero, Obsidian, and Codex.</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/YYCCCHAOOO/MindCite/releases/tag/v0.3.0"><img alt="Release v0.3.0" src="https://img.shields.io/badge/release-v0.3.0-blue"></a>
+  <img alt="Local First" src="https://img.shields.io/badge/local--first-safe-green">
+  <img alt="Zotero" src="https://img.shields.io/badge/Zotero-ready-red">
+  <img alt="Obsidian" src="https://img.shields.io/badge/Obsidian-ready-purple">
+  <img alt="Codex" src="https://img.shields.io/badge/Codex-smart%20deploy-black">
+</p>
+
+> Recommended path: use **Codex smart deployment** first. If you are comfortable with the command line, use **Quick Start**.
+
+MindCite turns a local Zotero library into a traceable, reusable, and extensible research workspace. It builds a local index from Zotero, generates structured reading notes for Obsidian, and supports note-based Q&A, classification governance, and theory/method/topic synthesis.
+
+This public template contains no real papers, Zotero databases, API keys, private indexes, logs, or personal research materials. `examples/demo-vault` is fully synthetic and only exists for testing the workflow.
+
+## Choose Your Path
+
+| You are | Start here | Best for |
+| --- | --- | --- |
+| A Codex user | [Codex Smart Deploy](#codex-smart-deploy) | Let Codex clone, configure, test, and connect to Zotero in read-only mode. |
+| A no-code user | [Codex Command Cookbook](docs/codex-command-cookbook.md) | Copy natural-language prompts and let Codex operate the workflow. |
+| A command-line user | [Quick Start](#quick-start) | Configure `.env` and run commands manually. |
+| Just exploring | [5-Minute Demo](#5-minute-demo) | Run synthetic demo data without Zotero paths or API keys. |
+| Working on classification | [Classification Guide](docs/classification-guide.md) | Understand theory/method/topic tags, review queues, and Zotero dry-run. |
+
+## Workflow
+
+```mermaid
+flowchart LR
+  Zotero["Local Zotero Library"] --> Index["Local Index"]
+  Index --> Reading["Reading Notes"]
+  Reading --> QA["Notes-based Q&A"]
+  Reading --> Classify["Classification Review Queue"]
+  Reading --> Tags["v0.3 Tag Taxonomy Audit"]
+  Tags --> Taxonomy["Formal Taxonomy"]
+  Classify --> Synthesis["Theory/Method/Topic Synthesis"]
+  Classify --> DryRun["Zotero Writeback Dry-run"]
+```
+
+## Highlights
+
+- Local-first: PDFs, Zotero databases, API keys, logs, and private notes stay local by default.
+- Traceable: Zotero index, reading notes, classification queues, and synthesis drafts are all file-based.
+- Demo-ready: `examples/demo-vault` lets you test the workflow immediately.
+- Extensible: LLM providers, embeddings, templates, classification dimensions, and data sources are configurable.
+- Safer long-term work: v0.2 adds schema validation, atomic writes, migration dry-runs, quarantine, and smoke tests.
+- Better classification governance: v0.3 audits the tag system itself with `a/p/m/r` decisions for accept, pending, merge, and reject.
+
+## Who This Is For
+
+- You manage papers with Zotero and want to persist reading outputs in Obsidian.
+- You want Codex or another AI coding agent to automate indexing, reading, classification, and synthesis.
+- You want a local knowledge workflow without uploading unpublished research, Zotero databases, PDFs, or API keys.
+
+## Who This Is Not For
+
+- You want a zero-setup web app.
+- You do not use Zotero or Obsidian yet.
+- You want to upload your entire private Vault to GitHub or a cloud service.
+- You expect AI to replace research judgment instead of assisting organization and drafting.
+
+## 5-Minute Demo
+
+Run the synthetic demo without real Zotero paths or API keys:
+
+```powershell
+git clone https://github.com/YYCCCHAOOO/MindCite.git MindCite
+cd MindCite
+python -m pip install -r requirements.txt
+python tools/structure_check.py
+python tools/validate_data_contracts.py --demo-only
+$env:MINDCITE_ROOT=(Resolve-Path .\examples\demo-vault)
+python _skills/Zotero-Library-Sync/scripts/vault_health_check.py
+python _skills/Classification-Governance-System/scripts/build_classification_review_queue.py --all
+python _skills/Classification-Governance-System/scripts/discover_open_tag_candidates.py --min-notes 1
+python _skills/Classification-Governance-System/scripts/prioritize_open_tag_candidates.py
+python _skills/Classification-Governance-System/scripts/apply_tag_taxonomy_decisions.py --use-markdown-operations
+Remove-Item Env:\MINDCITE_ROOT
+```
+
+If you see `ok: true`, the project structure, demo index, and classification queue are working.
+
+## Codex Smart Deploy
+
+If you use Codex, create a local workspace and paste this prompt:
+
+```text
+Please clone https://github.com/YYCCCHAOOO/MindCite and create a private local MindCite Vault for me. Install dependencies, copy config templates, run structure checks and the demo smoke test. Then detect my local Zotero database and storage paths in read-only mode, write them to local .env, and run update_zotero_index.py to generate a local index. Do not commit .env, indexes, logs, notes, PDFs, Zotero databases, or API keys. Do not run any --apply command. If testing the reading pipeline only, set MINDCITE_OFFLINE=1 to avoid remote model calls.
+```
+
+Codex should:
+
+- Clone the repository.
+- Copy `.env.example` and `config/mindcite.example.json`.
+- Install `requirements.txt`.
+- Run `python tools/structure_check.py` and `python tools/smoke_test.py`.
+- Detect `ZOTERO_DB_PATH` and `ZOTERO_STORAGE_PATH` in read-only mode.
+- Build a local Zotero index without writing back to Zotero.
+
+See [Codex Setup](docs/codex-setup.md) for details.
+
+If you have no coding background, start with the [Codex Command Cookbook](docs/codex-command-cookbook.md). It provides copy-ready prompts for deployment, indexing, reading, Q&A, classification, synthesis, and safety checks.
+
+## Quick Start
+
+1. Clone the repository.
+
+```powershell
+git clone https://github.com/YYCCCHAOOO/MindCite.git MindCite
+cd MindCite
+```
+
+2. Create local config files.
+
+```powershell
+Copy-Item .env.example .env
+Copy-Item config/mindcite.example.json config/mindcite.json
+```
+
+3. Edit `.env`.
+
+```text
+ZOTERO_DB_PATH=<your Zotero sqlite path>
+ZOTERO_STORAGE_PATH=<your Zotero storage folder>
+MINDCITE_LLM_PROVIDER=deepseek
+MINDCITE_EMBEDDING_PROVIDER=siliconflow
+DEEPSEEK_API_KEY=<your DeepSeek API key>
+SILICONFLOW_API_KEY=<your SiliconFlow API key>
+```
+
+4. Install dependencies.
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+5. Run checks.
+
+```powershell
+python tools/structure_check.py
+python tools/validate_data_contracts.py --demo-only
+```
+
+## Main Workflows
+
+### 1. Update Zotero Index
+
+```powershell
+python _skills/Zotero-Reading-System/scripts/update_zotero_index.py
+```
+
+This reads the local Zotero database in read-only mode and writes `indexes/zotero_library_index.jsonl`.
+
+### 2. Generate Reading Notes
+
+```powershell
+python _skills/Zotero-Reading-System/scripts/zotero_ai_reading_pipeline.py --next-count 2
+```
+
+To test without remote model calls:
+
+```powershell
+$env:MINDCITE_OFFLINE=1
+python _skills/Zotero-Reading-System/scripts/zotero_ai_reading_pipeline.py --next-count 1
+Remove-Item Env:\MINDCITE_OFFLINE
+```
+
+### 3. Notes-based Q&A
+
+--- LICENSE head ---
+MIT License
+
+Copyright (c) 2026 MindCite Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+--- requirements/manifests ---
+## requirements.txt
+pypdf>=4.0.0
+--- scripts/commands scan ---
+## schemas\classification_review_queue.schema.json
+2: "$schema": "https://json-schema.org/draft/2020-12/schema",
+## schemas\classification_taxonomy.schema.json
+2: "$schema": "https://json-schema.org/draft/2020-12/schema",
+## schemas\note_frontmatter.schema.json
+2: "$schema": "https://json-schema.org/draft/2020-12/schema",
+## schemas\reading_status.schema.json
+2: "$schema": "https://json-schema.org/draft/2020-12/schema",
+## schemas\zotero_library_index.schema.json
+2: "$schema": "https://json-schema.org/draft/2020-12/schema",
+## tools\safety_scan.py
+22: ".sqlite",
+## _skills\Classification-Governance-System\scripts\apply_zotero_writeback_sqlite.py
+6: import sqlite3
+25: REPORT_PATH = CONFIG.indexes_dir / "zotero_sqlite_writeback_report.jsonl"
+26: SUMMARY_PATH = CONFIG.indexes_dir / "zotero_sqlite_writeback_summary.md"
+27: BACKUP_DIR = CONFIG.logs_dir / "zotero_sqlite_writeback_backups"
+92: def read_item_collections(cur: sqlite3.Cursor, item_id: int) -> list[dict[str, Any]]:
+113: con = sqlite3.connect(str(ZOTERO_DB), timeout=10)
+196: "# Zotero SQLite Writeback Summary",
+217: parser = argparse.ArgumentParser(description="Apply Zotero collection writeback directly to zotero.sqlite.")
+218: parser.add_argument("--apply", action="store_true", help="Actually insert collection memberships into zotero.sqlite.")
+## _skills\Classification-Governance-System\scripts\apply_zotero_writeback.py
+26: LOCAL_API_BASE = "http://127.0.0.1:23119/api/users/0"
+## _skills\Zotero-Library-Sync\scripts\sync_publication_tags_to_notes.py
+6: import sqlite3
+51: conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro&immutable=1", uri=True)
+55: except sqlite3.Error:
+60: def connect_ro(path: Path) -> sqlite3.Connection:
+61: return sqlite3.connect(f"file:{path.as_posix()}?mode=ro&immutable=1", uri=True)
+152: def load_publication_meta(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
+## _skills\Zotero-Reading-System\config\reader_config.json
+7: "base_url": "https://api.deepseek.com",
+18: "base_url": "https://api.openai.com/v1",
+29: "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+40: "base_url": "https://open.bigmodel.cn/api/paas/v4",
+67: "url": "https://api.siliconflow.cn/v1/embeddings",
+75: "url": "https://api.openai.com/v1/embeddings",
+## _skills\Zotero-Reading-System\scripts\batch_read_from_index.py
+6: import sqlite3
+104: conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro&immutable=1", uri=True)
+108: except sqlite3.Error:
+113: def connect_db(path: Path) -> sqlite3.Connection:
+114: return sqlite3.connect(f"file:{path.as_posix()}?mode=ro&immutable=1", uri=True)
+117: def load_metadata(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
+241: "http://",
+242: "https://",
+415: link = f"https://doi.org/{link}"
+## _skills\Zotero-Reading-System\scripts\update_zotero_index.py
+4: import sqlite3
+72: conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro&immutable=1", uri=True)
+76: except sqlite3.Error:
+81: def connect_ro(path: Path) -> sqlite3.Connection:
+82: return sqlite3.connect(f"file:{path.as_posix()}?mode=ro&immutable=1", uri=True)
+91: def load_collections(conn: sqlite3.Connection) -> dict[int, CollectionNode]:
+134: def load_collection_memberships(conn: sqlite3.Connection) -> dict[int, list[int]]:
+142: def load_items(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+285: def load_item_tags(conn: sqlite3.Connection) -> dict[int, dict[str, list[str]]]:
+311: def load_attachments(conn: sqlite3.Connection) -> dict[int, list[dict[str, Any]]]:
+## _skills\Zotero-Reading-System\scripts\zotero_ai_reading_pipeline.py
+8: import sqlite3
+249: conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro&immutable=1", uri=True)
+253: except sqlite3.Error:
+258: def connect_db(path: Path) -> sqlite3.Connection:
+259: return sqlite3.connect(f"file:{path.as_posix()}?mode=ro&immutable=1", uri=True)
+262: def load_metadata(conn: sqlite3.Connection, item_keys: list[str]) -> dict[str, dict[str, Any]]:
+634: link = "https://doi.org/" + link
+851: link = "https://doi.org/" + link
+
+
+### research-knowledge-workflow
+commit: 4166c21c35f15ecd2d65504c5da7bf4a3650851e
+date: 2026-07-30 21:32:46 +0800
+files: 32
+--- README (first 180 lines) ---
+# Research Knowledge Workflow
+
+> Obsidian + Zotero + Codex 协同的可追溯研究知识库工作流
+
+`Research Knowledge Workflow` 是一个面向通用科研场景的 Codex Plugin + Skill。它把本地论文正文、Obsidian 关联笔记、Zotero 文献元数据和论文项目组织为一套可检索、可追溯、可持续更新的研究工作流，用于知识库构建、研究思路提炼、论文撰写与证据审计。
+
+它不限定学科。计算机、自然科学、工程、社会科学、经管和交叉研究都可以使用同一套证据框架；`ai4management` 仅在经管类任务中作为可选领域增强，而不是通用工作流的前置条件。
+
+## 核心能力
+
+- **构建知识库**：按本地论文目录聚合全文，生成带来源定位和双向链接的 Obsidian 主题笔记。
+- **主题定向发现**：知识笔记没有命中时，回查整个本地 PDF 目录的文件名与分类路径，只索引相关正文并生成待审阅笔记。
+- **提炼研究思路**：从已有文献中识别问题、争议、机制、方法缺口和可检验的研究问题。
+- **辅助论文撰写**：基于证据包起草或修改 Markdown、Word、LaTeX 论文内容。
+- **审计论证与引用**：检查主张是否有正文或摘要支撑，区分事实、推断、假设和待补证据。
+- **按需补充检索**：Zotero 条目没有本地正文时，仅在当前任务确有需要时调用学术检索能力核验摘要，不批量补全整个文献库。
+
+所有实质性任务固定使用两个 Codex Agent。两个 Agent 接收同一份冻结证据包，分别负责研究分析和证据约束写作，由父任务完成检索、合并、预览与写入。
+
+```mermaid
+flowchart LR
+    PDF["本地论文 PDF"] --> MCP["Research KB MCP"]
+    OBS["Obsidian 主题笔记"] <--> MCP
+    ZOT["Zotero 元数据与引用键"] --> MCP
+    DOC["Word / LaTeX / Markdown 正文"] --> MCP
+    MCP --> PACK["冻结证据包"]
+    PACK --> A1["Agent 1: 研究思路分析"]
+    PACK --> A2["Agent 2: 证据约束写作"]
+    A1 --> MERGE["主任务合并与证据审计"]
+    A2 --> MERGE
+    MERGE --> PREVIEW["笔记或正文预览"]
+    PREVIEW -->|用户确认后| WRITE["写入 Obsidian / 论文项目"]
+```
+
+## 四种工作模式
+
+| 模式 | 作用 |
+|---|---|
+| `build-knowledge` | 按相对目录分析本地 PDF，预览或更新 Obsidian 主题知识笔记 |
+| `ideate` | 从本地知识库与按需核验的外部文献中提炼研究问题和可验证方案 |
+| `write` | 根据证据台账起草或修改论文段落，不静默改写源文件 |
+| `audit` | 检查研究思路或论文的逻辑、方法、创新边界、主张支撑和引用完整性 |
+
+本地 PDF 与 Zotero 保持相互独立，不要求建立完整的一一对应关系。Zotero 中没有附件不影响本地正文入库，本地 PDF 没有 Zotero 条目也仍然可以被分析。
+
+## 项目结构
+
+```text
+research-knowledge-workflow/
+|- .codex-plugin/plugin.json
+|- .mcp.json
+|- skills/
+|  `- research-knowledge-workflow/
+|     |- SKILL.md
+|     |- agents/openai.yaml
+|     `- references/
+|- mcp-server/
+|- scripts/
+|- config.example.toml
+`- README.md
+```
+
+仓库、Plugin、Skill 与 MCP 统一使用 `research-knowledge-workflow`。旧版 `%APPDATA%\management-research-kb\config.toml` 和 `MANAGEMENT_RESEARCH_KB_CONFIG` 环境变量仍可回退读取，已有本地配置不必立即迁移。
+
+## 使用条件
+
+- 支持 Plugin、Skill、MCP 和子 Agent 的 Codex。
+- 一个包含本地论文正文或论文链接的 Obsidian Vault。
+- Zotero；需要稳定引用键时建议安装 Better BibTeX。
+- 可选的 `gs-search`、`gs-fulltext` 或 `academic-search`，用于当前任务所需的摘要或正文核验。
+- 可选的领域 Skill，例如经管研究中的 `ai4management`。
+
+Obsidian 的 Zotero Integration 可以继续用于个人阅读和导入，但本工作流不要求每篇 Obsidian 论文都能匹配 Zotero 条目。
+
+## 本地安装
+
+在仓库根目录执行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 `
+  -VaultPath "C:\path\to\your\ObsidianVault" `
+  -ManuscriptsRoot "C:\path\to\your\paper-projects"
+```
+
+安装脚本会创建隔离的 Python 环境，将新配置写入 `%APPDATA%\research-knowledge-workflow\config.toml`，并把 SQLite 派生缓存保存在 `%LOCALAPPDATA%\research-knowledge-workflow`。将仓库添加为本地 Codex Plugin 后，重新加载 Codex 并新建任务，使 Skill 与 MCP 重新发现。
+
+首次运行可以指定一个相对目录，也可以给出研究主题，由 `kb_prepare_topic` 轻量扫描 PDF 文件名和目录路径后只同步最相关的分类。它不会因为笔记缺失而解析整个 Vault。
+
+## 配置说明
+
+复制并修改 [config.example.toml](config.example.toml)，真实配置不要提交到 Git。
+
+- `vault_path`：Obsidian Vault，也是默认的本地 PDF 检索根目录。
+- `notes_dir`：Vault 内生成主题知识笔记的相对目录。
+- `manuscripts_root`：可选的 Word、LaTeX 或 Markdown 论文项目根目录。
+- `cache_dir`：本地索引目录，应放在 OneDrive、Obsidian 等同步目录之外。
+- `zotero_base_url`：Zotero 本地只读 API 地址。
+
+`.mcp.json` 将 MCP 注册为 `research-knowledge-workflow`。安装或更新插件后需要重新加载 Codex。
+
+## 快速使用流程
+
+下面是一条从“本地已有论文”到“形成研究思路并开始写作”的推荐路径。第一次使用时按顺序执行，后续只需从对应阶段进入。
+
+### 第一步：整理输入
+
+1. 把已下载的论文按研究主题放入 Obsidian Vault，例如 `机器学习/多视图/渐进融合/`。
+2. 文件名建议使用 `年份_标题.pdf`，方便人工浏览；工作流不会强制重命名已有文件。
+3. 在 Zotero 中继续维护题录、Collections、Tags 和 Better BibTeX 引用键。Zotero 与本地 PDF 不必完整一一对应。
+
+### 第二步：安装并检查连接
+
+运行安装脚本、重新加载 Codex 后，先输入：
+
+```text
+使用 $research-knowledge-workflow 检查知识库状态，只读取配置并报告 Obsidian、索引和 Zotero 的连接情况，不执行全库同步。
+```
+
+确认 Vault、缓存目录和 Zotero 状态正常后，再进入知识构建。Zotero 暂时不可用时仍可处理本地 PDF，只会把题录覆盖标记为不完整。
+
+### 第三步：构建主题知识笔记
+
+```text
+使用 $research-knowledge-workflow 的 build-knowledge 模式，同步“机器学习/多视图/渐进融合”目录，生成 Obsidian 主题笔记预览。保留页码、引用键和相关笔记链接，不要直接写入。
+```
+
+检查预览中的来源清单、综合结论、冲突和 `[[双向链接]]`。内容正确后回复“确认写入该笔记”，父任务才会重新校验目标并应用修改。
+
+不知道论文所在目录时，直接按主题构建：
+
+```text
+使用 $research-knowledge-workflow 的 build-knowledge 模式，以“多模态信息与营销”为主题检索本地论文库。使用“多模态、营销、直播、multimodal、marketing、live commerce、sales prediction”等中英文检索词，只同步最相关的目录，读取正文并生成 Obsidian 知识笔记预览，不要直接写入。
+```
+
+此时工作流先搜索已有笔记；命中不足时调用 `kb_prepare_topic`：
+
+1. 只扫描 Vault 中 PDF 的文件名和相对目录，不做全库全文解析。
+2. 用 `required_terms` 限定研究对象或领域，再按主题词覆盖率排列候选目录。例如“多模态营销”要求至少命中“营销、marketing、sales、commerce”之一，避免误选多模态医学或谣言检测目录。
+3. 只增量索引选中的目录，并返回带页码的正文批次。
+4. 固定两个 Agent 基于正文生成每个目录对应的知识笔记。
+5. 通过 `kb_write_knowledge_note(apply=false)` 返回完整预览，确认后才写入 Obsidian。
+
+因此，“Obsidian 笔记没有命中”只表示综合笔记尚未建立，不再被解释为“本地论文库没有相关正文”。
+
+### 第四步：提炼研究思路
+
+```text
+使用 $research-knowledge-workflow 的 ideate 模式，基于刚生成的主题笔记和原始论文，提出一个可检验的研究问题。输出问题背景、核心机制、最近邻工作、方法设计、验证或证伪路径，以及待补证据清单。
+```
+
+这一阶段固定由两个 Agent 基于同一证据包完成思路构建和证据约束审查。需要判断创新性时，工作流会记录外部检索范围；未完成检索则返回 `not_assessed`。
+
+### 第五步：辅助论文撰写
+
+```text
+使用 $research-knowledge-workflow 的 write 模式，根据已确认的研究思路和 claim ledger 起草相关工作小节。关键主张附引用键和页码，证据不足处标记 [EVIDENCE_NEEDED]，先返回草稿，不修改源文件。
+```
+
+审阅草稿后，可继续使用 `audit` 模式检查论证、方法、引用和创新边界。只有明确指定目标文件并确认差异预览后，才应用到 Word、LaTeX 或 Markdown 正文。
+
+```text
+本地论文与 Zotero -> build-knowledge -> Obsidian 主题笔记 -> ideate -> 研究方案 -> write -> 论文草稿 -> audit -> 修订
+```
+
+## 完整使用实例
+
+下面以“机器学习 / 多视图学习 / 渐进融合”目录为例。假设 Vault 中已有：
+
+```text
+文献/
+`- 机器学习/
+   `- 多视图/
+      `- 渐进融合/
+         |- 2025_Dynamic_Progressive_Fusion.pdf
+         `- 2025_Enhanced_Then_Progressive_Fusion.pdf
+```
+
+### 1. 生成 Obsidian 主题笔记
+
+向 Codex 输入：
+--- LICENSE head ---
+MIT License
+
+Copyright (c) 2026 muyunping123
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+--- requirements/manifests ---
+## .mcp.json
+{
+  "mcpServers": {
+    "research-knowledge-workflow": {
+      "type": "stdio",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "./scripts/run-mcp.ps1"
+      ]
+    }
+  }
+}
+## config.example.toml
+# Public runtime template. Put real values in a private, untracked config.
+# The vault is the local PDF discovery root; PDFs are grouped by their parent
+# directory relative to this path.
+vault_path = "C:/absolute/path/to/ObsidianVault"
+
+# Optional. Keep manuscript projects outside the vault.
+manuscripts_root = "C:/absolute/path/to/ResearchProjects"
+
+# Relative directory inside vault_path for generated category notes.
+notes_dir = "知识笔记"
+
+# Keep the derived index outside Obsidian, OneDrive, and other synced folders.
+cache_dir = "C:/absolute/path/to/local/research-knowledge-workflow-cache"
+
+# Zotero local API loopback endpoint. Zotero remains an independent source.
+zotero_base_url = "http://127.0.0.1:23119"
+
+# Bounded retrieval settings used by the local MCP service.
+max_group_documents = 20
+max_chars = 120000
+## mcp-server\config.example.toml
+vault_path = "C:/Users/your-name/OneDrive/research/literature"
+manuscripts_root = "C:/Users/your-name/OneDrive/research/manuscripts"
+notes_dir = "知识笔记"
+cache_dir = "C:/Users/your-name/AppData/Local/research-knowledge-workflow"
+zotero_base_url = "http://127.0.0.1:23119"
+max_group_documents = 20
+max_chars = 120000
+## mcp-server\pyproject.toml
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "research-knowledge-workflow-mcp"
+version = "0.4.0"
+description = "Read-first local MCP server for an Obsidian, PDF, and Zotero research knowledge base"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "mcp>=1.20,<2",
+  "pypdf>=5,<7",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10"]
+
+[project.scripts]
+research-knowledge-workflow-mcp = "management_research_kb.server:main"
+management-research-kb-mcp = "management_research_kb.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+--- scripts/commands scan ---
+## config.example.toml
+16: zotero_base_url = "http://127.0.0.1:23119"
+18: # Bounded retrieval settings used by the local MCP service.
+## .codex-plugin\plugin.json
+7: "url": "https://github.com/muyunping123"
+9: "homepage": "https://github.com/muyunping123/research-knowledge-workflow",
+10: "repository": "https://github.com/muyunping123/research-knowledge-workflow",
+## mcp-server\config.example.toml
+5: zotero_base_url = "http://127.0.0.1:23119"
+## mcp-server\pyproject.toml
+8: description = "Read-first local MCP server for an Obsidian, PDF, and Zotero research knowledge base"
+20: research-knowledge-workflow-mcp = "management_research_kb.server:main"
+21: management-research-kb-mcp = "management_research_kb.server:main"
+## mcp-server\src\management_research_kb\__init__.py
+1: """Local research knowledge-base MCP server."""
+## mcp-server\src\management_research_kb\config.py
+62: zotero_base_url: str = "http://127.0.0.1:23119"
+69: return self.cache_dir / "index.sqlite"
+145: data.get("zotero_base_url", "http://127.0.0.1:23119")
+## mcp-server\src\management_research_kb\database.py
+1: """SQLite derived cache with optional FTS5 page search."""
+7: import sqlite3
+24: def connect(self) -> Iterator[sqlite3.Connection]:
+25: connection = sqlite3.connect(self.path, timeout=30)
+26: connection.row_factory = sqlite3.Row
+98: def _meta(connection: sqlite3.Connection, key: str) -> str | None:
+105: def _set_meta(connection: sqlite3.Connection, key: str, value: str) -> None:
+114: def _initialize_fts(self, connection: sqlite3.Connection) -> None:
+123: except sqlite3.OperationalError:
+126: except sqlite3.OperationalError:
+217: def _delete_page_rows(self, connection: sqlite3.Connection, document_id: int) -> None:
+386: content_rows: list[sqlite3.Row]
+412: except sqlite3.OperationalError:
+444: connection: sqlite3.Connection,
+449: ) -> list[sqlite3.Row]:
+## mcp-server\src\management_research_kb\errors.py
+1: """Domain exceptions exposed as concise MCP tool errors."""
+## mcp-server\src\management_research_kb\server.py
+1: """Official Python MCP SDK stdio adapter for the core service."""
+11: from mcp.server.fastmcp import FastMCP
+24: mcp = FastMCP(
+256: parser = argparse.ArgumentParser(description="Research Knowledge Workflow MCP stdio server")
+## mcp-server\src\management_research_kb\service.py
+1: """Independently testable knowledge-base service used by MCP tools."""
+83: """Core implementation with no dependency on the MCP runtime."""
+1320: namespace = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+## mcp-server\src\management_research_kb\utils.py
+78: for prefix in ("https://doi.org/", "http://doi.org/", "doi:"):
+## mcp-server\tests\test_core.py
+387: client = ZoteroClient("http://127.0.0.1:23119", transport=transport)
+## mcp-server\tests\test_mcp_stdio.py
+11: from mcp import ClientSession, StdioServerParameters
+59: @unittest.skipUnless(MCP_AVAILABLE, "official MCP SDK is not installed")
+## scripts\install.ps1
+28: & $venvPython -m pip install --upgrade pip
+29: & $venvPython -m pip install -e (Join-Path $pluginRoot "mcp-server")
+53: "zotero_base_url = `"http://127.0.0.1:23119`"",
+61: Set-Content -LiteralPath $ConfigPath -Value $lines -Encoding UTF8
+
+
